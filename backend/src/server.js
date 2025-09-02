@@ -7,49 +7,54 @@ import { authenticateSocket } from './middleware/auth.js'
 import { handleConnection } from './socket/handlers.js'
 import messagesRouter from './routes/messages.js'
 
+// Load env variables
 dotenv.config({ path: '.env.local' })
 
 const app = express()
 const server = createServer(app)
+
+// ✅ Allow both local and production frontend
+const allowedOrigins = [
+  "http://localhost:3000",
+  "http://localhost:5173",
+  "https://messaging-app-v1.vercel.app"
+]
+
+// CORS middleware for Express REST routes
+app.use(cors({
+  origin: allowedOrigins,
+  credentials: true
+}))
+
+app.use(express.json())
+
+// Health check route
+app.get('/health', (req, res) => {
+  res.json({ status: 'OK', timestamp: new Date().toISOString() })
+})
+
+// API routes
+app.use('/api/messages', messagesRouter)
+
+// ✅ Socket.IO with CORS config
 const io = new Server(server, {
   cors: {
-    origin: "http://localhost:3000",
+    origin: allowedOrigins,
     methods: ["GET", "POST"],
     credentials: true
   },
   transports: ['websocket', 'polling']
 })
 
-const PORT = process.env.PORT || 3001
-
-// Middleware
-app.use(cors({
-  origin: "http://localhost:3000",
-  credentials: true
-}))
-app.use(express.json())
-
-// Routes
-app.get('/health', (req, res) => {
-  res.json({ status: 'OK', timestamp: new Date().toISOString() })
-})
-
-app.use('/api/messages', messagesRouter)
-
-// Socket.IO middleware and handlers
+// Socket middleware + handlers
 io.use(authenticateSocket)
-
 io.on('connection', (socket) => {
-  // ✅ Correct order: (socket, io)
   handleConnection(socket, io)
 })
 
-// Error handling
-app.use((err, req, res, next) => {
-  console.error(err.stack)
-  res.status(500).json({ error: 'Something went wrong!' })
-})
+const PORT = process.env.PORT || 3001
 
+// Start server
 server.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`)
 })
