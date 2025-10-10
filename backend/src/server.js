@@ -1,68 +1,116 @@
-import express from 'express'
-import { createServer } from 'http'
-import { Server } from 'socket.io'
-import cors from 'cors'
-import dotenv from 'dotenv'
-import { authenticateSocket } from './middleware/auth.js'
-import { handleConnection } from './socket/handlers.js'
-import messagesRouter from './routes/messages.js'
+import express from "express";
+import { createServer } from "http";
+import { Server } from "socket.io";
+import cors from "cors";
+import dotenv from "dotenv";
+import { authenticateSocket } from "./middleware/auth.js";
+import { handleConnection } from "./socket/handlers.js";
+import messagesRouter from "./routes/messages.js";
 
-// Load env variables
-dotenv.config({ path: '.env.local' })
+// -------------------------------
+// Load environment variables
+// -------------------------------
+dotenv.config({ path: ".env.local" });
 
-const app = express()
-const server = createServer(app)
+const app = express();
+const server = createServer(app);
 
-// ✅ Allow both local and production frontend
+// -------------------------------
+// Allowed Origins
+// -------------------------------
 const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:5173",
-  "https://messaging-app-v1.vercel.app"
-]
+  "https://messaging-app-v1.vercel.app",
+];
 
-// CORS middleware for Express REST routes
-app.use(cors({
-  origin: allowedOrigins,
-  credentials: true
-}))
+// -------------------------------
+// Dynamic CORS Function
+// -------------------------------
+const corsOptions = {
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true); // allow non-browser clients like Postman
 
-app.use(express.json())
+    if (
+      allowedOrigins.includes(origin) ||
+      /\.vercel\.app$/.test(origin) // ✅ allow any Vercel preview deployment
+    ) {
+      console.log(`✅ CORS allowed for: ${origin}`);
+      callback(null, true);
+    } else {
+      console.warn(`❌ CORS blocked for: ${origin}`);
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
+  credentials: true,
+};
 
-// Health check route
-app.get('/health', (req, res) => {
-  res.json({ status: 'OK', timestamp: new Date().toISOString() })
-})
+// -------------------------------
+// Express Middlewares
+// -------------------------------
+app.use(cors(corsOptions));
+app.use(express.json());
 
-// API routes
-app.use('/api/messages', messagesRouter)
+// -------------------------------
+// Health Check
+// -------------------------------
+app.get("/health", (req, res) => {
+  res.json({ status: "OK", timestamp: new Date().toISOString() });
+});
 
-// ✅ Socket.IO with CORS config
+// -------------------------------
+// REST API Routes
+// -------------------------------
+app.use("/api/messages", messagesRouter);
+
+// -------------------------------
+// Socket.IO Setup
+// -------------------------------
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigins,
+    origin: function (origin, callback) {
+      if (
+        allowedOrigins.includes(origin) ||
+        /\.vercel\.app$/.test(origin)
+      ) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
     methods: ["GET", "POST"],
-    credentials: true
+    credentials: true,
   },
-  transports: ['websocket', 'polling']
-})
+  transports: ["websocket", "polling"],
+});
 
-// Socket middleware + handlers
-io.use(authenticateSocket)
-io.on('connection', (socket) => {
-  handleConnection(socket, io)
-})
+// -------------------------------
+// Socket.IO Middleware + Handlers
+// -------------------------------
+io.use(authenticateSocket);
+io.on("connection", (socket) => {
+  console.log(`⚡ Client connected: ${socket.id}`);
+  handleConnection(socket, io);
 
-const PORT = process.env.PORT || 3001
+  socket.on("disconnect", () => {
+    console.log(`❌ Client disconnected: ${socket.id}`);
+  });
+});
 
-// Start server
+// -------------------------------
+// Server Start
+// -------------------------------
+const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`)
-})
+  console.log(`🚀 Server running on port ${PORT}`);
+});
 
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('SIGTERM received, shutting down gracefully')
+// -------------------------------
+// Graceful Shutdown
+// -------------------------------
+process.on("SIGTERM", () => {
+  console.log("SIGTERM received, shutting down gracefully");
   server.close(() => {
-    console.log('Process terminated')
-  })
-})
+    console.log("Process terminated");
+  });
+});
